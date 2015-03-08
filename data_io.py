@@ -54,19 +54,16 @@ def indexify(tokens,vocab):
 	return tokens
 
 
-def story_question_answer_idx(grouped_answers,vocabfile):
-	vocab = pickle.load(open(vocabfile,'rb'))
-	vocab_in  = { i:k for k,i in enumerate(vocab['input_vocab']) }
-	vocab_out = { i:k for k,i in enumerate(vocab['output_vocab']) }
+def story_question_answer_idx(grouped_answers,vocab_in,vocab_out):
 	for story,question,answer in grouped_answers:
 		inputs = [ indexify(tokens,vocab_in) for _,tokens in story ]
-		story_data = np.hstack(inputs)
+		story_data = np.hstack(inputs).astype(dtype=np.int32)
 
 		idxs = [0]
 		for seq in inputs: idxs.append(idxs[-1] + len(seq))
-		idxs = np.array(idxs)
+		idxs = np.array(idxs,dtype=np.int32)
 	
-		question_data = np.array(indexify(question,vocab_in))
+		question_data = np.array(indexify(question,vocab_in),dtype=np.int32)
 		
 		answer_word = vocab_out[answer[0]]
 		answer_evidence = answer[1][0]

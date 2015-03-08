@@ -1,6 +1,12 @@
 import data_io
 import sys
 import cPickle as pickle
+def load(filename):
+	vocab = pickle.load(open(filename,'rb'))
+	vocab_in  = { i:k for k,i in enumerate(vocab['input_vocab']) }
+	vocab_out = { i:k for k,i in enumerate(vocab['output_vocab']) }
+	return vocab_in,vocab_out
+
 if __name__ == "__main__":
 	filenames = sys.argv[1:-1]
 	output_file = sys.argv[-1]
