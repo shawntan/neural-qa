@@ -2,6 +2,7 @@ import re
 import sys
 import cPickle as pickle
 import numpy as np
+import vocab
 from pprint import pprint
 p1 = re.compile('([^ ])([\?\.\,\!\%])')
 p2 = re.compile('([\?\.\,\!\%])([^ ])')
@@ -56,6 +57,14 @@ def indexify(tokens,vocab):
 
 def story_question_answer_idx(grouped_answers,vocab_in,vocab_out):
 	for story,question,answer in grouped_answers:
+		answer_word = vocab_out[answer[0]]
+		answer_evidence = answer[1][0]
+
+		for i,(pos,_) in enumerate(story):
+			if pos == answer_evidence:
+				answer_evd_idx = i
+				break
+
 		inputs = [ indexify(tokens,vocab_in) for _,tokens in story ]
 		story_data = np.hstack(inputs).astype(dtype=np.int32)
 
@@ -65,16 +74,16 @@ def story_question_answer_idx(grouped_answers,vocab_in,vocab_out):
 	
 		question_data = np.array(indexify(question,vocab_in),dtype=np.int32)
 		
-		answer_word = vocab_out[answer[0]]
-		answer_evidence = answer[1][0]
-
-		yield story_data,idxs,question_data,answer_word,answer_evidence
+		yield story_data,idxs,question_data,answer_word,answer_evd_idx
 
 
 
 if __name__ == "__main__":
 	group_answers = group_answers(sys.argv[1])
-	for input_data,idxs,question_data,ans_w,ans_evd in story_question_answer_idx(group_answers,sys.argv[2]):
+
+	vocab_in,vocab_out = vocab.load("qa1_vocab.pkl")
+	training_set = story_question_answer_idx(group_answers,vocab_in,vocab_out)
+	for input_data,idxs,question_data,ans_w,ans_evd in training_set:
 		print input_data
 		print idxs
 		print question_data
