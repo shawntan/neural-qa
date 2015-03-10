@@ -9,98 +9,88 @@ from theano_toolkit import utils as U
 from theano_toolkit import updates
 from theano_toolkit.parameters import Parameters
 
-def build(P,name,layer_size,inputs_info,truncate_gradient=-1,bias=True,testing=False):
-	gates = ["in","out","forget","cell"]
-	weights = {}
-	for gate in gates:
-		hidden_weight_name = "W_%s_hidden_%s"%(name,gate)
-		cell_weight_name   = "W_%s_cell_%s"%(name,gate)
-		P[hidden_weight_name] = (0.1 * 2) * (np.random.rand(layer_size,layer_size) - 0.5)
-		if gate != "cell":
-			P[cell_weight_name] = (0.1 * 2) * (np.random.rand(layer_size,layer_size) - 0.5)
-		if bias:
-			hidden_bias_name = "b_%s_%s"%(name,gate)
-			if gate == "forget":
-				P[hidden_bias_name] = 3 + 0.0 * np.random.rand(layer_size)
-			else:
-				P[hidden_bias_name] = 0.0 * np.random.randn(layer_size)
-		for in_name,in_size in inputs_info:
-			input_weight_name = "W_%s_%s_%s"%(name,in_name,gate)
-			P[input_weight_name] = (0.1 * 2) * (np.random.rand(in_size,layer_size) - 0.5)
-			weights[in_name,gate] = P[input_weight_name]
+def build(P,name,input_size,hidden_size):
+	name_W_input  = "W_%s_input"%name
+	name_W_hidden = "W_%s_hidden"%name
+	name_W_cell   = "W_%s_cell"%name
+	name_b        = "b_%s"%name
+	name_init_hidden = "init_%s_hidden"%name
+	name_init_cell   = "init_%s_cell"%name
 
-	def transform(x,W):
-		if x.type.dtype.startswith('int'): #and len(x.type.broadcastable) == 1:
-			return W[x]
-		else:
-			return T.dot(x,W)
-	def lstm_layer(inputs,
-			initial_cell = None,
-			initial_hidden = None,
-			in_activation     = T.nnet.sigmoid,
-			out_activation    = T.nnet.sigmoid,
-			forget_activation = T.nnet.sigmoid,
-			cell_activation   = T.tanh,
-		):
+	P[name_W_input]  = (0.1 * 2) * (np.random.rand(input_size, hidden_size * 4) - 0.5)
+	P[name_W_hidden] = (0.1 * 2) * (np.random.rand(hidden_size,hidden_size * 4) - 0.5)
+	P[name_W_cell]   = (0.1 * 2) * (np.random.rand(hidden_size,hidden_size * 3) - 0.5)
 
-		if initial_hidden == None:
-			#P["init_%s_hidden"%name] = 0. * U.initial_weights(layer_size)
-			#initial_hidden = T.tanh(P["init_%s_hidden"%name])
-			initial_hidden = np.zeros((layer_size,),dtype=np.float32)
+	P[name_b] = np.zeros((hidden_size * 4,),dtype=np.float32)
 
-		if initial_cell == None:
-			#P["init_%s_cell"%name] = 0. * U.initial_weights(layer_size)
-			#initial_cell = P["init_%s_cell"%name]
-			initial_cell = np.zeros((layer_size,),dtype=np.float32)
+	P[name_init_hidden] = np.zeros((hidden_size,),dtype=np.float32)
+	P[name_init_cell]   = np.zeros((hidden_size,),dtype=np.float32)
 
-		U_i = P["W_%s_hidden_in"%name]
-		U_o = P["W_%s_hidden_out"%name]
-		U_f = P["W_%s_hidden_forget"%name]
-		U_c = P["W_%s_hidden_cell"%name]
+	def lstm_layer(X,row_transform=None):
 
-		V_i = P["W_%s_cell_in"%name]
-		V_o = P["W_%s_cell_out"%name]
-		V_f = P["W_%s_cell_forget"%name]
+		biases = P[name_b]
+		init_hidden = T.tanh(P[name_init_hidden])
+		init_cell   = P[name_init_cell]
 
-		if bias:
-			b_i = P["b_%s_in"%name]
-			b_o = P["b_%s_out"%name]
-			b_f = P["b_%s_forget"%name]
-			b_c = P["b_%s_cell"%name]
-		else:
-			b_i = b_o = b_f = b_c = np.float32(0.)
+		V_if = P[name_W_cell][:,0*hidden_size:2*hidden_size]
+		V_o  = P[name_W_cell][:,2*hidden_size:3*hidden_size]
 
-		X_i = sum(transform(ins,weights[n,"in"])     for ins,(n,_) in zip(inputs,inputs_info))
-		X_o = sum(transform(ins,weights[n,"out"])    for ins,(n,_) in zip(inputs,inputs_info))
-		X_f = sum(transform(ins,weights[n,"forget"]) for ins,(n,_) in zip(inputs,inputs_info))
-		X_c = sum(transform(ins,weights[n,"cell"])   for ins,(n,_) in zip(inputs,inputs_info))
+		b_i = biases[0*hidden_size:1*hidden_size]
+		b_f = biases[1*hidden_size:2*hidden_size] + 5
+		b_c = biases[2*hidden_size:3*hidden_size]
+		b_o = biases[3*hidden_size:4*hidden_size]
+		def step(x,prev_cell,prev_hid):
+			if row_transform != None:
+				x = row_transform(x)
+			transformed_x = T.dot(x,P[name_W_input])
+			x_i = transformed_x[0*hidden_size:1*hidden_size]
+			x_f = transformed_x[1*hidden_size:2*hidden_size]
+			x_c = transformed_x[2*hidden_size:3*hidden_size]
+			x_o = transformed_x[3*hidden_size:4*hidden_size]
 
-		def step(x_i,x_o,x_f,x_c,prev_cell,prev_hid):
-			in_lin     = x_i + T.dot(prev_hid,U_i) + b_i + T.dot(prev_cell,V_i) 
-			forget_lin = x_f + T.dot(prev_hid,U_f) + b_f + T.dot(prev_cell,V_f) 
-			cell_lin   = x_c + T.dot(prev_hid,U_c) + b_c
+			transformed_hid = T.dot(prev_hid,P[name_W_hidden])
+			h_i = transformed_hid[0*hidden_size:1*hidden_size]
+			h_f = transformed_hid[1*hidden_size:2*hidden_size]
+			h_c = transformed_hid[2*hidden_size:3*hidden_size]
+			h_o = transformed_hid[3*hidden_size:4*hidden_size]
+			
+			transformed_cell = T.dot(prev_cell,V_if)
+			c_i = transformed_cell[0*hidden_size:1*hidden_size]
+			c_f = transformed_cell[1*hidden_size:2*hidden_size]
 
-			in_gate      = in_activation(in_lin)
-			forget_gate  = forget_activation(forget_lin)
-			cell_updates = cell_activation(cell_lin)
+			in_lin     = x_i + h_i + b_i + c_i
+			forget_lin = x_f + h_f + b_f + c_f
+			cell_lin   = x_c + h_c + b_c
+
+			in_gate      = T.nnet.sigmoid(in_lin)
+			forget_gate  = T.nnet.sigmoid(forget_lin)
+			cell_updates = T.tanh(cell_lin)
+
 			cell = forget_gate * prev_cell + in_gate * cell_updates
 
-			out_lin = x_o + T.dot(prev_hid,U_o) + T.dot(cell,V_o) + b_o
-			out_gate = out_activation(out_lin)
+			out_lin = x_o + h_o + b_o + T.dot(cell,V_o)
+			out_gate = T.nnet.sigmoid(out_lin)
 
 			hid = out_gate * T.tanh(cell)
 
 			return cell,hid
 
-		if not testing:
-			[cell,hidden],_ = theano.scan(
-					step,
-					sequences    = [X_i,X_o,X_f,X_c],
-					outputs_info = [initial_cell,initial_hidden],
-					truncate_gradient = truncate_gradient
-				)
-			return cell,hidden
-		else:
-			return step(X_i,X_o,X_f,X_c,initial_cell,initial_hidden)
-
+		[cell,hidden],_ = theano.scan(
+				step,
+				sequences    = [X],
+				outputs_info = [init_cell,init_hidden],
+			)
+		return cell,hidden
 	return lstm_layer
+
+if __name__ == "__main__":
+	input_size = 10
+	output_size = 20
+	P = Parameters()
+	lstm_layer = build(P,"test",input_size,output_size)
+
+	cell,_ = lstm_layer(5 * np.random.rand(20,input_size).astype(dtype=np.float32))
+	print cell.eval()
+
+
+
