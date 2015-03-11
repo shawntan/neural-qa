@@ -4,6 +4,7 @@ import cPickle as pickle
 import numpy as np
 import vocab
 from pprint import pprint
+import random
 p1 = re.compile('([^ ])([\?\.\,\!\%])')
 p2 = re.compile('([\?\.\,\!\%])([^ ])')
 
@@ -76,7 +77,19 @@ def story_question_answer_idx(grouped_answers,vocab_in,vocab_out):
 		
 		yield story_data,idxs,question_data,answer_word,answer_evd_idx
 
-
+def randomise(stream,buffer_size=100):
+	buf = buffer_size * [None]
+	ptr = 0
+	for item in stream:
+		buf[ptr] = item
+		ptr += 1
+		if ptr == buffer_size:
+			random.shuffle(buf)
+			for x in buf:
+				yield x
+	buf = buf[:ptr]
+	random.shuffle(buf)
+	for x in buf: yield x
 
 if __name__ == "__main__":
 	group_answers = group_answers(sys.argv[1])
