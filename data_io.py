@@ -85,8 +85,8 @@ def randomise(stream,buffer_size=100):
 		ptr += 1
 		if ptr == buffer_size:
 			random.shuffle(buf)
-			for x in buf:
-				yield x
+			for x in buf: yield x
+			ptr = 0
 	buf = buf[:ptr]
 	random.shuffle(buf)
 	for x in buf: yield x

@@ -10,6 +10,22 @@ import model
 import vocab
 import data_io
 import sys
+def make_functions(inputs,outputs,params,grads):
+	acc_grads = [ theano.shared(np.zeros(p.get_value().shape,dtype=np.float32)) for p in params ]
+	count = theano.shared(np.float32(0))
+	acc_update = [ (a,a+g) for a,g in zip(acc_grads,grads) ] + [ (count,count + 1) ]
+	
+	avg_acc_grads = [ ag / count for ag in acc_grads ]
+	param_update = updates.adadelta(params,avg_acc_grads) + \
+					[ (a,np.zeros(p.get_value().shape,dtype=np.float32)) for a,p in zip(acc_grads,params) ] + \
+					[ (count,0) ]
+	acc = theano.function(
+			inputs  = inputs,
+			outputs = outputs,
+			updates = acc_update
+		)
+	update = theano.function(inputs=[],updates = param_update)
+	return acc,update
 
 if __name__ == "__main__":
 	training_file = sys.argv[1]
@@ -25,6 +41,7 @@ if __name__ == "__main__":
 		idxs  = T.ivector('idxs')
 		qstn  = T.ivector('qstn')
 		ans_evd = T.iscalar('ans_evd')
+		ans_lbl = T.iscalar('ans_lbl')
 
 		attention = model.build(P,
 			word_rep_size = 16,
@@ -34,15 +51,17 @@ if __name__ == "__main__":
 			output_size = len(vocab_out),
 			map_fun_size = 64
 		)
-	
-		output = attention(story,idxs,qstn)
+
+		output_evd,output_ans = attention(story,idxs,qstn)
+		cost = -(T.log(output_evd[ans_evd]) + T.log(output_ans[ans_lbl]))
 		print "Done."
-		params = P.values()
-		cost = -T.log(output[ans_evd])
+
 		print "Calculating gradient expression...",
+		params = P.values()
 		grads = T.grad(cost,wrt=params)
 		print "Done."
-		inputs = [story,idxs,qstn,ans_evd]
+
+		inputs = [story,idxs,qstn,ans_evd,ans_lbl]
 		outputs = cost
 		pickle.dump(
 				(inputs,outputs,params,grads),
@@ -50,18 +69,23 @@ if __name__ == "__main__":
 			)
 
 	print "Compiling native...",
-	f = theano.function(
-			inputs=inputs,
-			outputs = cost,
-			#updates = [ (p,p-0.1*g) for p,g in zip(params,grads) ]
-			updates = updates.adadelta(params,grads) 
-		)
+	acc,update = make_functions(inputs,outputs,params,grads)
 	print "Done."
-
-	for epoch in xrange(10):
+	batch_size = 10 
+	for epoch in xrange(30):
 		group_answers = data_io.group_answers(training_file)
 		training_data = data_io.story_question_answer_idx(group_answers,vocab_in,vocab_out)
 		training_data = data_io.randomise(training_data)
-
+		
+		loss  = 0
+		count = 0
 		for input_data,idxs,question_data,ans_w,ans_evd in training_data:
-			print f(input_data,idxs,question_data,ans_evd)
+			loss  += acc(input_data,idxs,question_data,ans_evd,ans_w)
+			count += 1
+			if count == batch_size:
+				update()
+				print loss/count
+				loss  = 0
+				count = 0
+
+		update()
