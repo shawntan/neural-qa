@@ -33,11 +33,11 @@ def build_stmt_encoder(P,input_size,hidden_size):
 def build_diag_encoder(P,stmt_size,hidden_size,encode_stmt):
 	lstm_layer = lstm.build(P,"diag",stmt_size,hidden_size)
 	def encode_diag(X,idxs):
-		cells,_ = lstm_layer(
+		cells,hiddens = lstm_layer(
 			T.arange(idxs.shape[0]-1),
 			row_transform = (lambda i:encode_stmt(X[idxs[i]:idxs[i+1]]))
 		)
-		return cells
+		return cells,hiddens
 	return encode_diag
 
 
@@ -57,10 +57,10 @@ def build(P,
 	def qa(story,idxs,qstn):
 		word_feats = P.W_vocab[story]
 		qn_word_feats = P.W_vocab[qstn]
-		cum_stmt_vectors = encode_diag(word_feats,idxs)
+		cum_stmt_vectors, lookup_vectors = encode_diag(word_feats,idxs)
 		qn_vector = encode_stmt(qn_word_feats)
 		key = stmt2key(qn_vector)
-		stmt_attention = U.vector_softmax(T.dot(key,cum_stmt_vectors.T))
+		stmt_attention = U.vector_softmax(T.dot(key,lookup_vectors.T))
 		selected_vector = T.dot(stmt_attention,cum_stmt_vectors)
 		output = U.vector_softmax(diag2output(selected_vector))
 		return stmt_attention,output
