@@ -35,7 +35,11 @@ if __name__ == "__main__":
 	training_file = sys.argv[1]
 	compute_tree_exists = False
 
-	vocab_in,vocab_out = vocab.load("qa1_vocab.pkl")
+	vocab_in = vocab.load("qa2.pkl")
+	vocab_size = len(vocab_in)
+	print "Vocab size is:", vocab_size
+	entity_size = 20
+	evidence_count = 2
 	if compute_tree_exists:
 		inputs,outputs,params,grads = pickle.load(open("compute_tree.pkl"))
 	else:
@@ -44,20 +48,27 @@ if __name__ == "__main__":
 		story = T.ivector('story')
 		idxs  = T.ivector('idxs')
 		qstn  = T.ivector('qstn')
-		ans_evd = T.iscalar('ans_evd')
+		ans_evds = T.ivector('ans_evds')
 		ans_lbl = T.iscalar('ans_lbl')
 
 		attention = model.build(P,
 			word_rep_size = 16,
 			stmt_hidden_size = 32,
 			diag_hidden_size = 64,
-			vocab_size  = len(vocab_in),
-			output_size = len(vocab_out),
-			map_fun_size = 64
+			vocab_size  = vocab_size + entity_size,
+			output_size = entity_size,
+			map_fun_size = 64,
+			evidence_count = evidence_count
 		)
 
-		output_evd,output_ans = attention(story,idxs,qstn)
-		cost = -(T.log(output_evd[ans_evd]) + T.log(output_ans[ans_lbl]))
+		output_evds,output_ans = attention(story,idxs,qstn)
+		cost = -(
+					T.log(output_ans[ans_lbl]) + \
+					sum(
+						T.log(output_evds[i][ans_evds[i]])
+							for i in xrange(evidence_count)
+					)
+				)
 		print "Done."
 
 		print "Calculating gradient expression...",
@@ -65,7 +76,7 @@ if __name__ == "__main__":
 		grads = T.grad(cost,wrt=params)
 		print "Done."
 
-		inputs = [story,idxs,qstn,ans_evd,ans_lbl]
+		inputs = [story,idxs,qstn,ans_lbl,ans_evds]
 		outputs = cost
 		pickle.dump(
 				(inputs,outputs,params,grads),
@@ -75,10 +86,12 @@ if __name__ == "__main__":
 	print "Compiling native...",
 	acc,update = make_functions(inputs,outputs,params,grads)
 	test = theano.function(
-			inputs = [story,idxs,qstn,ans_evd,ans_lbl],
+			inputs = [story,idxs,qstn,ans_lbl,ans_evds],
 			outputs = [
-				T.neq(T.argmax(output_evd),ans_evd),
 				T.neq(T.argmax(output_ans),ans_lbl),
+			] + [
+				T.neq(T.argmax(output_evds[i]),ans_evds[i])
+					for i in xrange(evidence_count)
 			]
 		)
 
@@ -93,14 +106,12 @@ if __name__ == "__main__":
 	for epoch in xrange(30):
 		group_answers = data_io.group_answers(training_file)
 		train_group_answers = islice(group_answers,train_instance_count)
-		training_data = data_io.story_question_answer_idx(train_group_answers,vocab_in,vocab_out)
+		training_data = data_io.story_question_answer_idx(train_group_answers,vocab_in)
 		training_data = data_io.randomise(training_data)
-		
 		loss  = 0
 		count = 0
-		for input_data,idxs,question_data,ans_w,ans_evd in training_data:
-			pass
-			loss  += acc(input_data,idxs,question_data,ans_evd,ans_w)
+		for input_data,idxs,question_data,ans_w,ans_evds in training_data:
+			loss  += acc(input_data,idxs,question_data,ans_w,ans_evds)
 			count += 1
 			if count == batch_size:
 				update()
@@ -109,10 +120,10 @@ if __name__ == "__main__":
 				count = 0
 		update()
 
-		test_data = data_io.story_question_answer_idx(group_answers,vocab_in,vocab_out)
+		test_data = data_io.story_question_answer_idx(group_answers,vocab_in)
 		errors = sum(
-				np.array(test(input_data,idxs,question_data,ans_evd,ans_w),dtype=np.float32)
-				for input_data,idxs,question_data,ans_w,ans_evd in test_data
+				np.array(test(input_data,idxs,question_data,ans_w,ans_evds),dtype=np.float32)
+				for input_data,idxs,question_data,ans_w,ans_evds in test_data
 			 )/(instance_count - train_instance_count)
 		print errors
 		if errors.sum() < best_error:
