@@ -14,13 +14,28 @@ import lstm
 from theano_toolkit import utils as U
 from theano_toolkit.parameters import Parameters
 from theano_toolkit import updates
+def combined_probs(prob_dists,idxs,pos=0):
+	print prob_dists,idxs
+	if len(prob_dists) > 0:
+		total_prob = 0
+		for i in xrange(len(prob_dists)):
+			total_prob += prob_dists[i][idxs[pos]] * \
+					combined_probs(
+						prob_dists[:i] + prob_dists[i+1:],
+						idxs,pos=pos+1
+					)
+		return total_prob
+	else:
+		return 1
+
+
 def make_functions(inputs,outputs,params,grads):
 	acc_grads = [ theano.shared(np.zeros(p.get_value().shape,dtype=np.float32)) for p in params ]
 	count = theano.shared(np.float32(0))
 	acc_update = [ (a,a+g) for a,g in zip(acc_grads,grads) ] + [ (count,count + 1) ]
 	
 	avg_acc_grads = [ ag / count for ag in acc_grads ]
-	param_update = updates.adadelta(params,avg_acc_grads) + \
+	param_update = updates.rmsprop(params,avg_acc_grads) + \
 					[ (a,np.zeros(p.get_value().shape,dtype=np.float32)) for a,p in zip(acc_grads,params) ] + \
 					[ (count,0) ]
 	acc = theano.function(
@@ -57,17 +72,14 @@ if __name__ == "__main__":
 			diag_hidden_size = 64,
 			vocab_size  = vocab_size + entity_size,
 			output_size = entity_size,
-			map_fun_size = 64,
+			map_fun_size = 256,
 			evidence_count = evidence_count
 		)
 
 		output_evds,output_ans = attention(story,idxs,qstn)
 		cost = -(
 					T.log(output_ans[ans_lbl]) + \
-					sum(
-						T.log(output_evds[i][ans_evds[i]])
-							for i in xrange(evidence_count)
-					)
+					T.log(combined_probs(output_evds,ans_evds))
 				)
 		print "Done."
 
@@ -89,9 +101,10 @@ if __name__ == "__main__":
 			inputs = [story,idxs,qstn,ans_lbl,ans_evds],
 			outputs = [
 				T.neq(T.argmax(output_ans),ans_lbl),
-			] + [
-				T.neq(T.argmax(output_evds[i]),ans_evds[i])
-					for i in xrange(evidence_count)
+				(1 - T.prod(T.eq(
+					T.sort(T.argmax(T.stack(*output_evds),axis=1)),
+					T.sort(ans_evds)
+				)))
 			]
 		)
 
@@ -107,6 +120,7 @@ if __name__ == "__main__":
 		group_answers = data_io.group_answers(training_file)
 		train_group_answers = islice(group_answers,train_instance_count)
 		training_data = data_io.story_question_answer_idx(train_group_answers,vocab_in)
+		#training_data = data_io.sortify(training_data,key=lambda x:x[1].shape[0])
 		training_data = data_io.randomise(training_data)
 		loss  = 0
 		count = 0

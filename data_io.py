@@ -102,6 +102,21 @@ def randomise(stream,buffer_size=100):
 	random.shuffle(buf)
 	for x in buf: yield x
 
+def sortify(stream,key,buffer_size=100):
+	buf = buffer_size * [None]
+	ptr = 0
+	for item in stream:
+		buf[ptr] = item
+		ptr += 1
+		if ptr == buffer_size:
+			buf.sort(key=key)
+			for x in buf: yield x
+			ptr = 0
+	buf = buf[:ptr]
+	buf.sort(key=key)
+	for x in buf: yield x
+
+
 if __name__ == "__main__":
 	group_answers = group_answers(sys.argv[1])
 
