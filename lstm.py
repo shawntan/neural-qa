@@ -12,8 +12,8 @@ from theano_toolkit.parameters import Parameters
 def build(P,name,input_size,hidden_size):
 	name_init_hidden = "init_%s_hidden"%name
 	name_init_cell   = "init_%s_cell"%name
-	P[name_init_hidden] = np.zeros((hidden_size,),dtype=np.float32)
-	P[name_init_cell]   = np.zeros((hidden_size,),dtype=np.float32)
+	P[name_init_hidden] = (0.1 * 2) * (np.random.rand(hidden_size) - 0.5)
+	P[name_init_cell]   = (0.1 * 2) * (np.random.rand(hidden_size) - 0.5)
 	step = build_step(P,name,input_size,hidden_size)
 
 	def lstm_layer(X,row_transform=lambda x:x):
@@ -39,18 +39,21 @@ def build_step(P,name,input_size,hidden_size):
 	P[name_W_input]  = (0.1 * 2) * (np.random.rand(input_size, hidden_size * 4) - 0.5)
 	P[name_W_hidden] = (0.1 * 2) * (np.random.rand(hidden_size,hidden_size * 4) - 0.5)
 	P[name_W_cell]   = (0.1 * 2) * (np.random.rand(hidden_size,hidden_size * 3) - 0.5)
-
-	P[name_b] = np.zeros((hidden_size * 4,),dtype=np.float32)
+	
+	bias_init = np.zeros((hidden_size * 4,),dtype=np.float32)
+	bias_init[1*hidden_size:2*hidden_size] = 10
+	P[name_b] = bias_init
 	biases = P[name_b]
 	V_if = P[name_W_cell][:,0*hidden_size:2*hidden_size]
 	V_o  = P[name_W_cell][:,2*hidden_size:3*hidden_size]
 
 	b_i = biases[0*hidden_size:1*hidden_size]
-	b_f = biases[1*hidden_size:2*hidden_size] + 5
+	b_f = biases[1*hidden_size:2*hidden_size] 
 	b_c = biases[2*hidden_size:3*hidden_size]
 	b_o = biases[3*hidden_size:4*hidden_size]
 	def step(x,prev_cell,prev_hid):
 		transformed_x = T.dot(x,P[name_W_input])
+
 		x_i = transformed_x[0*hidden_size:1*hidden_size]
 		x_f = transformed_x[1*hidden_size:2*hidden_size]
 		x_c = transformed_x[2*hidden_size:3*hidden_size]
