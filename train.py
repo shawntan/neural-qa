@@ -35,14 +35,21 @@ def ordered_probs(prob_dists,idxs):
 
 
 
-def make_functions(inputs,outputs,params,grads):
+def make_functions(inputs,outputs,params,grads,lr):
 	shapes = [ p.get_value().shape for p in params ]
 	acc_grads = [ theano.shared(np.zeros(s,dtype=np.float32)) for s in shapes ]
 	count = theano.shared(np.float32(0))
 	acc_update = [ (a,a+g) for a,g in zip(acc_grads,grads) ] + [ (count,count + 1) ]
+
+	deltas = acc_grads
+#	deltas      = [ ag / count for ag in acc_grads ]
+	grads_norms = [ T.sqrt(T.sum(g**2)) for g in deltas ]
+	deltas      = [ T.switch(T.gt(n,30),30*g/n,g)
+					for n,g in zip(grads_norms,deltas) ]
 	
-	avg_acc_grads = [ ag / count for ag in acc_grads ]
-	param_update = updates.adadelta(params,avg_acc_grads)
+	param_update = [ (p, p - lr * g) for p,g in zip(params,deltas) ]
+#	param_update = updates.adadelta(params,deltas)
+	
 	clear_update = [ 
 			(a,np.zeros(s,dtype=np.float32)) 
 			for a,s in zip(acc_grads,shapes) 
@@ -50,9 +57,14 @@ def make_functions(inputs,outputs,params,grads):
 	acc = theano.function(
 			inputs  = inputs,
 			outputs = outputs,
-			updates = acc_update
+			updates = acc_update,
+			on_unused_input='warn'
 		)
-	update = theano.function(inputs=[],updates = param_update + clear_update)
+	update = theano.function(
+			inputs=[lr],
+			updates = param_update + clear_update,
+			on_unused_input='warn'
+		)
 	return acc,update
 
 if __name__ == "__main__":
@@ -62,7 +74,6 @@ if __name__ == "__main__":
 	vocab_in = vocab.load("qa2.pkl")
 	vocab_size = len(vocab_in)
 	print "Vocab size is:", vocab_size
-	entity_size = 10
 	evidence_count = 2
 	if compute_tree_exists:
 		inputs,outputs,params,grads = pickle.load(open("compute_tree.pkl"))
@@ -79,20 +90,16 @@ if __name__ == "__main__":
 			word_rep_size = 50,
 			stmt_hidden_size = 100,
 			diag_hidden_size = 100,
-			vocab_size  = vocab_size + entity_size,
-			output_size = entity_size,
+			vocab_size  = vocab_size,
+			output_size = vocab_size,
 			map_fun_size = 100,
 			evidence_count = evidence_count
 		)
 
 		output_evds,output_ans = attention(story,idxs,qstn)
-		cost = -(
-					T.log(output_ans[ans_lbl]) + \
-					0. * T.log(ordered_probs(output_evds,ans_evds))
-				) + 1e-5 * sum(
-					T.sum(w**2) for w in P.values() 
-					if not w.name != 'W_vocab'
-				)
+		cost = -T.log(output_ans[ans_lbl]) 
+		#cost += 1e-5 * sum(T.sum(w**2) for w in P.values() )
+		#cost += -T.log(ordered_probs(output_evds,ans_evds)) 
 		print "Done."
 		print "Parameter count:", P.parameter_count()
 
@@ -109,15 +116,20 @@ if __name__ == "__main__":
 			)
 
 	print "Compiling native...",
-	acc,update = make_functions(inputs,outputs,params,grads)
+	lr = T.fscalar('lr')
+	acc,update = make_functions(inputs,outputs,params,grads,lr)
 	test = theano.function(
 			inputs = [story,idxs,qstn,ans_lbl,ans_evds],
-			outputs =  \
-				1 - T.eq(T.argmax(output_ans),ans_lbl) * T.prod(T.eq(
-					T.sort(T.argmax(T.stack(*output_evds),axis=1)),
-					T.sort(ans_evds)
-				))
+			outputs =  1 - T.eq(T.argmax(output_ans),ans_lbl),
+			on_unused_input='warn'
 		)
+	"""
+		1 - T.eq(T.argmax(output_ans),ans_lbl) * T.prod(T.eq(
+			T.sort(T.argmax(T.stack(*output_evds),axis=1)),
+			T.sort(ans_evds)
+		)),
+	"""
+
 
 	print "Done."
 
@@ -127,19 +139,20 @@ if __name__ == "__main__":
 
 	test_instance_count = int(0.1 * instance_count)
 	print "Total:",instance_count,"Testing:",test_instance_count
-	best_error = np.inf
+	best_error = 1. 
+
 	#P.load('model.pkl')
 
-	batch_size = 2
-	buffer_size = 200 / batch_size
-	length_limit = 9
-	for epoch in xrange(100):
+	batch_size = 16
+	length_limit = 13
+	learning_rate = 0.01
+	epoch = 1
+	while True:
 		group_answers = data_io.group_answers(training_file)
 		test_group_answers = islice(group_answers,test_instance_count)
 		test_data = data_io.story_question_answer_idx(
 						test_group_answers,
-						vocab_in,
-						entity_count=entity_size
+						vocab_in
 					)
 		errors = sum(
 				np.array(
@@ -150,31 +163,39 @@ if __name__ == "__main__":
 			 )/test_instance_count
 		print "Error rate:",errors
 		print "Starting epoch ",epoch
-		if errors < best_error:
+		if errors <= best_error:
 			P.save('model.pkl')
 			best_error = errors
-			length_limit += 4
-		batch_size = max(1,batch_size//2)
-		buffer_size = 200 / batch_size
+			length_limit += 2
+		else:
+#			learning_rate = learning_rate / 2
+#			batch_size = max(1,batch_size//2)
+#			print "Learning rate:",learning_rate
+			P.save('tmp.model.pkl')
+		buffer_size = 256 / batch_size
 
 		train_group_answers = data_io.randomise(group_answers)
-		training_data = data_io.story_question_answer_idx(train_group_answers,vocab_in,entity_count=entity_size)
+		training_data = data_io.story_question_answer_idx(train_group_answers,vocab_in)
+		training_data = ( x for x in training_data if x[1].shape[0] <= length_limit )
 		training_data = data_io.sortify(training_data,key=lambda x:x[1].shape[0])
 		batched_training_data = data_io.batch(training_data,batch_size=batch_size)
 		batched_training_data = data_io.randomise(batched_training_data,buffer_size=buffer_size)
-		loss  = 0
-		count = 0
+
 		for batch in batched_training_data:
+			loss  = 0
+			count = 0
 			for input_data,idxs,question_data,ans_w,ans_evds in batch:
-				if idxs.shape[0] <= length_limit:
 					print idxs.shape[0],
 					loss  += acc(input_data,idxs,question_data,ans_w,ans_evds)
 					count += 1
-				else:
-					break
-			if count > 0:
-				update()
-				print loss/count
-				loss  = 0
-				count = 0
+			update(learning_rate)
+			print loss/count
+		epoch += 1
+		if epoch % 15 == 0:
+			learning_rate = learning_rate / 2
+		if epoch % 30 == 0:
+			batch_size = max(batch_size // 2,1)
+			
+
+
 

@@ -41,7 +41,7 @@ def build_step(P,name,input_size,hidden_size):
 	P[name_W_cell]   = (0.1 * 2) * (np.random.rand(hidden_size,hidden_size * 3) - 0.5)
 	
 	bias_init = np.zeros((hidden_size * 4,),dtype=np.float32)
-	bias_init[1*hidden_size:2*hidden_size] = 10
+	bias_init[1*hidden_size:2*hidden_size] = 3
 	P[name_b] = bias_init
 	biases = P[name_b]
 	V_if = P[name_W_cell][:,0*hidden_size:2*hidden_size]
@@ -88,13 +88,44 @@ def build_step(P,name,input_size,hidden_size):
 
 
 if __name__ == "__main__":
-	input_size = 10
-	output_size = 20
 	P = Parameters()
-	lstm_layer = build(P,"test",input_size,output_size)
+	X = T.ivector('X')
+	P.V = np.zeros((8,8),dtype=np.int32)
 
-	cell,_ = lstm_layer(5 * np.random.rand(20,input_size).astype(dtype=np.float32))
-	print cell.eval()
+	X_rep = P.V[X]
+	P.W_output = np.zeros((15,8),dtype=np.int32)
+	lstm_layer = build(P,
+			name = "test",
+			input_size = 8,
+			hidden_size =15 
+		)
+
+	_,hidden = lstm_layer(X_rep)
+	output = T.nnet.softmax(T.dot(hidden,P.W_output))
+	delay = 5
+	label = X[:-delay]
+	predicted = output[delay:]
+
+	cost = -T.sum(T.log(predicted[T.arange(predicted.shape[0]),label]))
+	params = P.values()
+	gradients = T.grad(cost,wrt=params)
+
+	train = theano.function(
+			inputs = [X],
+			outputs = cost,
+			updates = [ (p, p - 0.01 * g) for p,g in zip(params,gradients) ],
+		)
+
+
+	while True:
+		print train(
+				np.random.randint(0,8,size=20).astype(np.int32)
+			)
+			
+
+
+	
+
 
 
 

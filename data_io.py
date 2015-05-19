@@ -51,39 +51,16 @@ def group_answers(filename):
 			else:
 				yield (prev_inputs,input_sentence[1],response_sentence)
 
-def indexify(story,vocab_in,entity_count):
-	idxs = range(entity_count)
-	random.shuffle(idxs)
-	vocab_size = len(vocab_in)
-	entity_map = {}
-
-	def _index(tokens,no_create=False):
-		result = []
-		for t in tokens:
-			if t in vocab_in:
-				idx = vocab_in[t]
-			else:
-				if t not in entity_map:
-					assert(not no_create)
-					entity_map[t] = vocab_size + idxs[len(entity_map)]
-				idx = entity_map[t]
-
-			result.append(idx)
-		return result
-
-	inputs = [ _index(tokens) for _,tokens in story ]
-
-	return inputs,entity_map,_index
+def indexify(sentence,vocab):
+	return [ vocab[t] for t in sentence ]
 
 
-def story_question_answer_idx(grouped_answers,vocab_in,entity_count):
+def story_question_answer_idx(grouped_answers,vocab):
 	for story,question,answer in grouped_answers:
-		inputs,entity_map,indexer = indexify(story,vocab_in,entity_count)
+		inputs = [ indexify(s,vocab) for _,s in story ]
 		story_data = np.hstack(inputs).astype(dtype=np.int32)
-
-		answer_word      = entity_map[answer[0]] - len(vocab_in)
+		answer_word      = vocab[answer[0]]
 		answer_evidences = answer[1]
-		assert(answer_word >= 0)
 		answer_evd_idxs = []
 		for answer_evidence in answer_evidences:
 			for i,(pos,_) in enumerate(story):
@@ -93,7 +70,7 @@ def story_question_answer_idx(grouped_answers,vocab_in,entity_count):
 		idxs = [0]
 		for seq in inputs: idxs.append(idxs[-1] + len(seq))
 		idxs = np.array(idxs,dtype=np.int32)
-		question_data = np.array(indexer(question,no_create=True),dtype=np.int32)
+		question_data = np.array(indexify(question,vocab),dtype=np.int32)
 		
 		yield story_data,idxs,question_data,answer_word,answer_evd_idxs
 
@@ -143,11 +120,5 @@ if __name__ == "__main__":
 	rev_map = {}
 	for key,val in vocab_in.iteritems(): rev_map[val] = key
 	for input_data,idxs,question_data,ans_w,ans_evd in training_set:
-		tokens = [ (rev_map[i] if i in rev_map else str(i-len(vocab_in))) for i in input_data ]
-		sentences = [ ' '.join(tokens[idxs[i]:idxs[i+1]]) for i in xrange(idxs.shape[0]-1) ]
-		pprint(sentences)
-		print ' '.join(  (rev_map[i] if i in rev_map else str(i-len(vocab_in))) for i in question_data )
-		for idx in ans_evd:
-			print sentences[idx]
-		print ans_w
-		print
+		print input_data
+

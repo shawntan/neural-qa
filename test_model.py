@@ -10,7 +10,6 @@ if __name__ == "__main__":
 	vocab_in = vocab.load("qa2.pkl")
 
 	vocab_size = len(vocab_in)
-	entity_size = 10
 	evidence_count = 2
 
 	P = Parameters()
@@ -19,7 +18,7 @@ if __name__ == "__main__":
 		stmt_hidden_size = 100,
 		diag_hidden_size = 100,
 		vocab_size  = vocab_size,
-		output_size = entity_size,
+		output_size = vocab_size,
 		map_fun_size = 100,
 		evidence_count = evidence_count
 	)
@@ -32,23 +31,25 @@ if __name__ == "__main__":
 			outputs = output_evds+[output_ans]
 		)
 
-	P.load('model.pkl')
+	P.load('tmp.model.pkl')
+#	params = pickle.load(open('tmp.model.pkl'))	
+#	hinton.plot(params['vocab'])
 
-	training_set = story_question_answer_idx(group_answers,vocab_in,entity_count=10)
+	training_set = story_question_answer_idx(group_answers,vocab_in)
 	rev_map = {}
 	for key,val in vocab_in.iteritems(): rev_map[val] = key
 
-	for _ in xrange(0): training_set.next()
+	for _ in xrange(2): training_set.next()
 	input_data,idxs,question_data,ans_w,ans_evd = training_set.next()
 
-	tokens = [ (rev_map[i] if i in rev_map else str(i-len(vocab_in))) for i in input_data ]
+	tokens = [ rev_map[i] for i in input_data ]
 	sentences = [ ' '.join(tokens[idxs[i]:idxs[i+1]]) for i in xrange(idxs.shape[0]-1) ]
 	pprint(sentences)
-	print ' '.join(  (rev_map[i] if i in rev_map else str(i-len(vocab_in))) for i in question_data )
+	print ' '.join(rev_map[i] for i in question_data)
 	for idx in ans_evd:
 		print sentences[idx]
-	print ans_w
-	print
+	print rev_map[ans_w]
+	
 
 
 	evidence_answer = answer(input_data,idxs,question_data)
