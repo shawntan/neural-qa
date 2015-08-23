@@ -14,12 +14,12 @@ if __name__ == "__main__":
 
 	P = Parameters()
 	attention = model.build(P,
-		word_rep_size = 50,
-		stmt_hidden_size = 100,
-		diag_hidden_size = 100,
+		word_rep_size = 128,
+		stmt_hidden_size = 128,
+		diag_hidden_size = 128,
 		vocab_size  = vocab_size,
 		output_size = vocab_size,
-		map_fun_size = 100,
+		map_fun_size = 128,
 		evidence_count = evidence_count
 	)
 	story = T.ivector('story')
@@ -31,15 +31,16 @@ if __name__ == "__main__":
 			outputs = output_evds+[output_ans]
 		)
 
-	P.load('tmp.model.pkl')
-#	params = pickle.load(open('tmp.model.pkl'))	
+	P.load('model.pkl')
+	#P.load(open('tmp.model.pkl'))	
 #	hinton.plot(params['vocab'])
 
 	training_set = story_question_answer_idx(group_answers,vocab_in)
 	rev_map = {}
 	for key,val in vocab_in.iteritems(): rev_map[val] = key
-
-	for _ in xrange(2): training_set.next()
+	import random
+	
+	for _ in xrange(3): training_set.next()
 	input_data,idxs,question_data,ans_w,ans_evd = training_set.next()
 
 	tokens = [ rev_map[i] for i in input_data ]
@@ -58,6 +59,7 @@ if __name__ == "__main__":
 	
 	print "Evidences:"
 	for i,e in enumerate(evd_prob): 
+		print e
 		print "predicted",
 		hinton.plot(e,max_arr=1)
 		correct = np.zeros((e.shape[0],))

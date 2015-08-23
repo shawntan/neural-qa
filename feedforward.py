@@ -10,7 +10,7 @@ def build(P,name,
 
 	input_weights = []
 	for i,size in enumerate(input_sizes):
-		P["W_%s_hidden_input_%d"%(name,i)] = (0.1 * 2) * (np.random.rand(size,hidden_sizes[0]) - 0.5)
+		P["W_%s_hidden_input_%d"%(name,i)] = 0. * np.random.randn(size,hidden_sizes[0])
 		input_weights.append(P["W_%s_hidden_input_%d"%(name,i)])
 	P["b_%s_hidden_input"%name] = np.zeros((hidden_sizes[0],),dtype=np.float32)
 	b_hidden_input = P["b_%s_hidden_input"%name]

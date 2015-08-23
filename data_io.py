@@ -5,6 +5,7 @@ import numpy as np
 import vocab
 from pprint import pprint
 import random
+import math
 p1 = re.compile('([^ ])([\?\.\,\!\%])')
 p2 = re.compile('([\?\.\,\!\%])([^ ])')
 
@@ -88,7 +89,7 @@ def randomise(stream,buffer_size=100):
 	random.shuffle(buf)
 	for x in buf: yield x
 
-def sortify(stream,key,buffer_size=100):
+def sortify(stream,key=lambda x:x,buffer_size=500):
 	buf = buffer_size * [None]
 	ptr = 0
 	for item in stream:
@@ -98,27 +99,39 @@ def sortify(stream,key,buffer_size=100):
 			buf.sort(key=key)
 			for x in buf: yield x
 			ptr = 0
+
 	buf = buf[:ptr]
 	buf.sort(key=key)
 	for x in buf: yield x
 
-def batch(stream,batch_size=10):
-	batch = []
-	for item in stream:
-		batch.append(item)
-		if len(batch) == batch_size:
-			yield batch
+def batch(stream,batch_size=10,criteria=lambda x,y: True):
+	def yield_batches(batch):
+		random.shuffle(batch)
+		sub_batches = int(math.ceil(len(batch) / float(batch_size)))
+		for i in xrange(sub_batches):
+			yield batch[i * batch_size:(i + 1) * batch_size]
+
+	batch = None
+	try:
+		while True:
 			batch = []
-	if len(batch) > 0: yield batch
+			batch.append(stream.next())
+			item = stream.next()
+			while criteria(batch[0],item):
+				batch.append(item)
+				item = stream.next()
+			for x in yield_batches(batch): yield x
+
+	except StopIteration:
+		for x in yield_batches(batch): yield x
+	
 
 if __name__ == "__main__":
-	from pprint import pprint
-	group_answers = group_answers(sys.argv[1])
-
-	vocab_in = vocab.load("qa2.pkl")
-	training_set = story_question_answer_idx(group_answers,vocab_in)
-	rev_map = {}
-	for key,val in vocab_in.iteritems(): rev_map[val] = key
-	for input_data,idxs,question_data,ans_w,ans_evd in training_set:
-		print input_data
-
+	
+	val = list(
+			x 
+			for b in batch(sortify(randomise(iter(xrange(1000)))) )
+			for x in b
+		)
+	print val
+	print len(val)
