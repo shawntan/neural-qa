@@ -31,7 +31,7 @@ if __name__ == "__main__":
 			outputs = output_evds+[output_ans]
 		)
 
-	P.load('model.pkl')
+	P.load('tmp.model.pkl')
 	#P.load(open('tmp.model.pkl'))	
 #	hinton.plot(params['vocab'])
 
@@ -40,7 +40,7 @@ if __name__ == "__main__":
 	for key,val in vocab_in.iteritems(): rev_map[val] = key
 	import random
 	
-	for _ in xrange(3): training_set.next()
+	for _ in xrange(122): training_set.next()
 	input_data,idxs,question_data,ans_w,ans_evd = training_set.next()
 
 	tokens = [ rev_map[i] for i in input_data ]

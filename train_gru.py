@@ -19,10 +19,15 @@ def make_functions(inputs,outputs,params,grads,lr):
     acc_grads = [ theano.shared(np.zeros(s,dtype=np.float32)) for s in shapes ]
     count = theano.shared(np.float32(0))
     acc_update = [ (a,a+g) for a,g in zip(acc_grads,grads) ] + [ (count,count + 1.) ]
+
+#    deltas = acc_grads
     deltas      = [ ag / count for ag in acc_grads ]
     grads_norms = [ T.sqrt(T.sum(g**2)) for g in deltas ]
     deltas      = [ T.switch(T.gt(n,1.),1.*g/n,g) for n,g in zip(grads_norms,deltas) ]
-    param_update = updates.adadelta(params,deltas,learning_rate=lr)
+    
+#    param_update = [ (p, p - lr * g) for p,g in zip(params,deltas) ]
+    param_update = updates.adadelta(params,deltas,learning_rate=lr) # ,learning_rate=lr,rho=np.float32(0.95)
+
     clear_update = [ 
             (a,np.zeros(s,dtype=np.float32)) 
             for a,s in zip(acc_grads,shapes) 
@@ -32,12 +37,14 @@ def make_functions(inputs,outputs,params,grads,lr):
             outputs = [outputs,output_ans[ans_lbl]],
             updates = acc_update,
             on_unused_input='warn',
+#            mode=theano.compile.MonitorMode(post_func=detect_nan)
         )
     update = theano.function(
             inputs=[lr],
             updates = param_update + clear_update,
             outputs = [ T.sqrt(T.sum(T.sqr(w))) for w in deltas ],
             on_unused_input='warn',
+#            mode=theano.compile.MonitorMode(post_func=detect_nan)
         )
     return acc,update
 

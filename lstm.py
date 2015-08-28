@@ -9,6 +9,14 @@ from theano_toolkit import utils as U
 from theano_toolkit import updates
 from theano_toolkit.parameters import Parameters
 
+def orthogonal_init(*dimensions):
+	flat_dimensions = (dimensions[0], np.prod(dimensions[1:]))
+	a = np.random.randn(*flat_dimensions)
+	u,_,v = np.linalg.svd(a, full_matrices=False)
+	q = u if u.shape == flat_dimensions else v # pick the one with the correct shape
+	q = q.reshape(dimensions)
+	return q
+
 def build(P,name,input_size,hidden_size):
 	name_init_hidden = "init_%s_hidden"%name
 	name_init_cell   = "init_%s_cell"%name
@@ -37,9 +45,9 @@ def build_step(P,name,input_size,hidden_size):
 	name_W_hidden = "W_%s_hidden"%name
 	name_W_cell   = "W_%s_cell"%name
 	name_b        = "b_%s"%name
-	P[name_W_input]  = 0.01 * np.random.randn(input_size,  hidden_size * 4)
-	P[name_W_hidden] = 0.01 * np.random.randn(hidden_size, hidden_size * 4)
-	P[name_W_cell]   = 0.01 * np.random.randn(hidden_size, hidden_size * 3)
+	P[name_W_input]  = orthogonal_init(input_size,  hidden_size * 4)
+	P[name_W_hidden] = orthogonal_init(hidden_size, hidden_size * 4)
+	P[name_W_cell]   = orthogonal_init(hidden_size, hidden_size * 3)
 
 #	(0.1 * 2) * (np.random.rand(input_size, hidden_size * 4) - 0.5)
 #	(0.1 * 2) * (np.random.rand(hidden_size,hidden_size * 4) - 0.5)
