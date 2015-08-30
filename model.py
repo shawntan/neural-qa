@@ -12,6 +12,15 @@ def random_init(*dimensions):
 def zeros_init(*dimensions):
     return np.zeros(dimensions,dtype=np.float32)
 
+def orthogonal_init(*dimensions):
+    flat_dimensions = (dimensions[0], np.prod(dimensions[1:]))
+    a = np.random.randn(*flat_dimensions)
+    u,_,v = np.linalg.svd(a, full_matrices=False)
+    q = u if u.shape == flat_dimensions else v # pick the one with the correct shape
+    q = q.reshape(dimensions)
+    return q
+
+
 def build_stmt_encoder(P,input_size,hidden_size):
     gru_layer = gru.build(
             P,
@@ -26,24 +35,35 @@ def build_stmt_encoder(P,input_size,hidden_size):
     return encode_stmts
 
 def build_lookup(P,input_size,key_size,hidden_size=128):
-    P.W_lookup_input_hidden = random_init(input_size,hidden_size)
-    P.W_lookup_key_hidden = random_init(key_size,hidden_size)
+    P.W_lookup_input_hidden = 0.1 * random_init(input_size,hidden_size)
+    P.W_lookup_key_hidden = 0.1 * random_init(key_size,hidden_size)
     P.b_lookup_hidden = zeros_init(hidden_size)
-    P.W_lookup = zeros_init(hidden_size)
+    P.W_lookup = 0.01 * random_init(hidden_size)
+    P.W_before_after = 0.00 * random_init(key_size)
+    P.b_before_after = 0.0
+    P.time_factor = 0.
     def prepare_lookup(sentence_reps):
         _hidden = T.dot(sentence_reps,P.W_lookup_input_hidden)
-        def lookup(key):
-            score = T.dot(T.tanh(
+        time = T.arange(sentence_reps.shape[0])
+        def lookup(key,prev_attn):
+            sim_score = T.dot(T.tanh(
                     T.dot(key,P.W_lookup_key_hidden) +\
                     _hidden + P.b_lookup_hidden
                 ),P.W_lookup)
-            return T.nnet.softmax(score.dimshuffle('x',0))[0]
+            before_after = T.dot(key,P.W_before_after) + P.b_before_after
+            prev_location = T.dot(prev_attn,time)
+            before_after_prob = T.nnet.sigmoid(before_after * (time - prev_location))
+
+            score = T.exp(sim_score + P.time_factor * time) *\
+                    (1 - prev_attn) * before_after_prob
+            probs = score / T.sum(score)
+            return probs
         return lookup
     return prepare_lookup
 
 def build_reasoner(P,input_size,hidden_size):
-    P.W_reasoner_input_hidden = random_init(input_size,hidden_size)
-    P.W_reasoner_hidden_hidden = random_init(hidden_size,hidden_size)
+    P.W_reasoner_input_hidden = 0.1 * random_init(input_size,hidden_size)
+    P.W_reasoner_hidden_hidden = orthogonal_init(hidden_size,hidden_size)
     P.b_reasoner_hidden = zeros_init(hidden_size)
     def reason(state,evidence):
         return T.tanh(
@@ -70,17 +90,23 @@ def build(P,
             hidden_size=sentence_rep_size
         )
 
+    P.W_stmt_reason_state = 0.1 * random_init(sentence_rep_size,2 * sentence_rep_size)
+    P.b_reason_state = zeros_init(2 * sentence_rep_size)
+
     prepare_lookup = build_lookup(
             P,
             input_size=sentence_rep_size,
-            key_size=sentence_rep_size
+            key_size=sentence_rep_size * 2
         )
     reason = build_reasoner(
             P,
             input_size=sentence_rep_size,
-            hidden_size=sentence_rep_size
+            hidden_size=sentence_rep_size * 2
         )
-    P.W_output = random_init(sentence_rep_size,output_size)
+
+    P.W_output_hidden = 0.1 * random_init(sentence_rep_size * 2,sentence_rep_size)
+    P.b_output_hidden = zeros_init(sentence_rep_size)
+    P.W_output = 0.0 * random_init(sentence_rep_size,output_size)
     P.b_output = zeros_init(output_size)
 
     def qa(stmt_idxs):
@@ -91,50 +117,20 @@ def build(P,
         question_rep = sentence_reps[-1]
         lookup = prepare_lookup(story_reps)
 
-        reasoning_state = question_rep
+        reasoning_state = T.tanh(T.dot(question_rep,P.W_stmt_reason_state) + P.b_reason_state)
         attention = [None] * evidence_count
+        prev_attention = 0
         for i in xrange(evidence_count):
-            attention[i] = lookup(reasoning_state)
-            evidence = T.dot(attention[i],story_reps)
-            reasoning_state = reason(reasoning_state,evidence)
+            attention[i] = lookup(reasoning_state,prev_attention)
+
+            reasoning_state = T.dot(
+                        attention[i],
+                        reason(reasoning_state,story_reps)
+                    )
+            prev_attention = attention[i]
         
-        final_scores = T.dot(reasoning_state,P.W_output) + P.b_output
-        return T.nnet.softmax(final_scores.dimshuffle('x',0))[0]
+        output_hidden = T.tanh(T.dot(reasoning_state,P.W_output_hidden) + P.b_output_hidden)
+        final_scores = T.dot(output_hidden,P.W_output) + P.b_output
+        return T.nnet.softmax(final_scores.dimshuffle('x',0))[0], attention
     return qa
-
-if __name__ == "__main__":
-    P = Parameters()
-    vocab_size = 53
-    qa = build(P,
-            vocab_size=vocab_size,
-            word_rep_size=vocab_size,
-            sentence_rep_size=128,
-            output_size=vocab_size,
-            evidence_count=2
-        )
-    story = np.array([[-1, 25, 34, 45, 43,  7,  0],
-                      [-1, 41, 26, 45, 43, 37,  0],
-                      [-1, 41, 34, 45, 43, 28,  0],
-                      [-1, 10, 47, 45, 43,  7,  0],
-                      [25, 50,  5, 45, 43, 37,  0],
-                      [-1, 32, 47, 45, 43, 18,  0],
-                      [-1, 41, 34, 45, 43, 22,  0],
-                      [-1, 41, 50, 45, 43, 18,  0],
-                      [25, 50,  5, 45, 43, 28,  0],
-                      [-1, 10, 50, 45, 43, 37,  0],
-                      [-1, 41, 34, 45, 43, 22,  0],
-                      [10, 38, 48, 43,  3, 44,  0],
-                      [-1, 32, 50, 45, 43,  7,  0],
-                      [10, 50,  5, 45, 43, 18,  0],
-                      [-1, -1, 10, 30, 43,  3,  0],
-                      [-1, 10, 20, 43,  3, 44,  0],
-                      [-1, 41, 46, 43, 16, 44,  0],
-                      [-1, -1, 10, 11, 43,  3,  0],
-                      [-1, 32, 26, 45, 43, 28,  0],
-                      [-1, 41, 26, 45, 43, 28,  0],
-                      [-1, -1, 51, 24, 43,  3,  1]],dtype=np.int32)
-    print qa(story).eval()
-
-
-
 

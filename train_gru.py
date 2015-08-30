@@ -19,14 +19,8 @@ def make_functions(inputs,outputs,params,grads,lr):
     acc_grads = [ theano.shared(np.zeros(s,dtype=np.float32)) for s in shapes ]
     count = theano.shared(np.float32(0))
     acc_update = [ (a,a+g) for a,g in zip(acc_grads,grads) ] + [ (count,count + 1.) ]
-
-#    deltas = acc_grads
-    deltas      = [ ag / count for ag in acc_grads ]
-    grads_norms = [ T.sqrt(T.sum(g**2)) for g in deltas ]
-    deltas      = [ T.switch(T.gt(n,1.),1.*g/n,g) for n,g in zip(grads_norms,deltas) ]
-    
-#    param_update = [ (p, p - lr * g) for p,g in zip(params,deltas) ]
-    param_update = updates.adadelta(params,deltas,learning_rate=lr) # ,learning_rate=lr,rho=np.float32(0.95)
+    deltas     = [ ag / count for ag in acc_grads ]
+    param_update = updates.adadelta(params,deltas,learning_rate=lr,delta_preprocess=updates.clip(1.)) # ,learning_rate=lr,rho=np.float32(0.95)
 
     clear_update = [ 
             (a,np.zeros(s,dtype=np.float32)) 
@@ -34,7 +28,7 @@ def make_functions(inputs,outputs,params,grads,lr):
             ] + [ (count,0) ]
     acc = theano.function(
             inputs  = inputs,
-            outputs = [outputs,output_ans[ans_lbl]],
+            outputs = [outputs,T.eq(T.argmax(output_ans),ans_lbl)],
             updates = acc_update,
             on_unused_input='warn',
 #            mode=theano.compile.MonitorMode(post_func=detect_nan)
@@ -70,22 +64,22 @@ if __name__ == "__main__":
             evidence_count=evidence_count
         )
 
-    output_ans = attention(story)
+    output_ans,output_evds = attention(story)
 
-    cross_entropy = -T.log(output_ans[ans_lbl]) # \
-#            + -T.log(output_evds[0][ans_evds[0]]) \
-#            + -T.log(output_evds[1][ans_evds[1]]) 
+    cross_entropy = -T.log(output_ans[ans_lbl])  \
+            + -T.log(output_evds[0][ans_evds[0]]) \
+            + -T.log(output_evds[1][ans_evds[1]]) 
     #cost += -T.log(ordered_probs(output_evds,ans_e.vds)) 
     print "Done."
     print "Parameter count:", P.parameter_count()
 
     print "Calculating gradient expression...",
     params = P.values()
-    cost = cross_entropy
+    cost = cross_entropy #+ 1e-5 * sum(T.sum(T.sqr(w)) for w in params)
     grads = T.grad(cost,wrt=params)
     print "Done."
 
-    inputs = [story,ans_lbl]#,ans_evds]
+    inputs = [story,ans_lbl,ans_evds]
     outputs = cross_entropy
 
     print "Compiling native...",
@@ -108,7 +102,7 @@ if __name__ == "__main__":
 
     #P.load('model.pkl')
 
-    batch_size = 8
+    batch_size = 32
     length_limit = np.inf
     learning_rate = 1e-6
     epoch = 1
@@ -140,11 +134,11 @@ if __name__ == "__main__":
 
         train_group_answers = data_io.randomise(group_answers)
         training_data = data_io.story_question_answer_idx_(train_group_answers,vocab_in)
-        training_data = data_io.sortify(training_data,key=lambda x:x[1].shape[0])
+        training_data = data_io.sortify(training_data,key=lambda x:x[0].shape[0])
         batched_training_data = data_io.batch(
                 training_data,
                 batch_size=batch_size,
-                criteria=lambda x,x_:abs(x[1].shape[0] - x_[1].shape[0]) <= 2
+                criteria=lambda x,x_:abs(x[0].shape[0] - x_[0].shape[0]) <= 2
             )
         batched_training_data = data_io.randomise(batched_training_data,buffer_size=buffer_size)
         
@@ -154,7 +148,7 @@ if __name__ == "__main__":
             count = 0
             for input_data,ans_evds,ans_w in batch:
                 print input_data.shape[0],
-                curr_loss  = np.array(acc(input_data,ans_w))
+                curr_loss  = np.array(acc(input_data,ans_w,ans_evds))
                 if np.isnan(curr_loss).any():
                     print curr_loss 
                     exit()
@@ -168,7 +162,4 @@ if __name__ == "__main__":
 
         print "Seen",group_count,"groups"
         epoch += 1
-        if epoch % 15 == 0:
-            learning_rate = learning_rate / 2
-        if epoch % 30 == 0:
-            batch_size = max(batch_size // 2,1)
+

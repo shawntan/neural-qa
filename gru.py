@@ -7,6 +7,14 @@ from theano_toolkit import utils as U
 from theano_toolkit import updates
 from theano_toolkit.parameters import Parameters
 
+def orthogonal_init(*dimensions):
+    flat_dimensions = (dimensions[0], np.prod(dimensions[1:]))
+    a = np.random.randn(*flat_dimensions)
+    u,_,v = np.linalg.svd(a, full_matrices=False)
+    q = u if u.shape == flat_dimensions else v # pick the one with the correct shape
+    q = q.reshape(dimensions)
+    return q
+
 
 def build(P, name, input_size, hidden_size, truncate_gradient=-1):
     P["init_%s_hidden" % name] = np.zeros((hidden_size,))
@@ -42,8 +50,12 @@ def _build_step(P, name, input_size, hidden_size, batched):
     name_W_hidden = "W_%s_hidden" % name
     name_W_cell = "W_%s_cell" % name
     name_b = "b_%s" % name
-    P[name_W_input]  = 0.1 * np.random.rand(input_size,  hidden_size * 3)
-    P[name_W_hidden] = 0.1 * np.random.rand(hidden_size, hidden_size * 3)
+    P[name_W_input]  = 0.01 * np.random.rand(input_size,  hidden_size * 3)
+    transition_weights = np.empty((hidden_size, hidden_size * 3),dtype=np.float32)
+    transition_weights[:,0 * hidden_size:1 * hidden_size] = orthogonal_init(hidden_size,hidden_size)
+    transition_weights[:,1 * hidden_size:2 * hidden_size] = orthogonal_init(hidden_size,hidden_size)
+    transition_weights[:,2 * hidden_size:3 * hidden_size] = orthogonal_init(hidden_size,hidden_size)
+    P[name_W_hidden] = transition_weights
 
     bias_init = np.zeros((3, hidden_size), dtype=np.float32)
     bias_init[1] = 2.5

@@ -6,77 +6,67 @@ from pprint import pprint
 import theano.tensor as T
 import theano
 if __name__ == "__main__":
-	group_answers = group_answers(sys.argv[1])
-	vocab_in = vocab.load("qa2.pkl")
+    group_answers = group_answers(sys.argv[1])
+    vocab_in = vocab.load("qa2.pkl")
 
-	vocab_size = len(vocab_in)
-	evidence_count = 2
+    vocab_size = len(vocab_in)
+    evidence_count = 2
 
-	P = Parameters()
-	attention = model.build(P,
-		word_rep_size = 128,
-		stmt_hidden_size = 128,
-		diag_hidden_size = 128,
-		vocab_size  = vocab_size,
-		output_size = vocab_size,
-		map_fun_size = 128,
-		evidence_count = evidence_count
-	)
-	story = T.ivector('story')
-	idxs  = T.ivector('idxs')
-	qstn  = T.ivector('qstn')
-	output_evds,output_ans = attention(story,idxs,qstn)
-	answer = theano.function(
-			inputs = [story,idxs,qstn],
-			outputs = output_evds+[output_ans]
-		)
+    P = Parameters()
+    attention = model.build(P,
+            vocab_size=vocab_size + 1,
+            word_rep_size=vocab_size,
+            sentence_rep_size=128,
+            output_size=vocab_size,
+            evidence_count=evidence_count
+        )
 
-	P.load('tmp.model.pkl')
-	#P.load(open('tmp.model.pkl'))	
-#	hinton.plot(params['vocab'])
+    story = T.imatrix('story')
+    output_ans,output_evds = attention(story)
+    answer = theano.function(
+            inputs = [story],
+            outputs = output_evds+[output_ans]
+        )
 
-	training_set = story_question_answer_idx(group_answers,vocab_in)
-	rev_map = {}
-	for key,val in vocab_in.iteritems(): rev_map[val] = key
-	import random
-	
-	for _ in xrange(122): training_set.next()
-	input_data,idxs,question_data,ans_w,ans_evd = training_set.next()
+    P.load('tmp.model.pkl')
+    #P.load(open('tmp.model.pkl'))    
+#    hinton.plot(params['vocab'])
 
-	tokens = [ rev_map[i] for i in input_data ]
-	sentences = [ ' '.join(tokens[idxs[i]:idxs[i+1]]) for i in xrange(idxs.shape[0]-1) ]
-	pprint(sentences)
-	print ' '.join(rev_map[i] for i in question_data)
-	for idx in ans_evd:
-		print sentences[idx]
-	print rev_map[ans_w]
-	
+    training_set = story_question_answer_idx_(group_answers,vocab_in)
+    rev_map = {}
+    for key,val in vocab_in.iteritems(): rev_map[val] = key
 
+    rev_map[-1] = "<unk>"
+    import random
+    
+    for _ in xrange(3): training_set.next()
+    input_data,ans_evds,ans_w = training_set.next()
+    sentences = [ ' '.join(rev_map[input_data[i,j]] 
+                    for j in xrange(input_data.shape[1]))
+                        for i in xrange(input_data.shape[0]) ]
+    pprint(sentences)
+    evidence_answer = answer(input_data)
+    evd_prob = evidence_answer[:evidence_count]
+    ans_prob = evidence_answer[-1]
+    
+    print "Evidences:"
+    for i,e in enumerate(evd_prob): 
+        print e
+        print "predicted",
+        hinton.plot(e,max_arr=1)
+        correct = np.zeros((e.shape[0],))
+        correct[ans_evds[i]] = 1
+        print "correct  ",
+        hinton.plot(correct)
 
-	evidence_answer = answer(input_data,idxs,question_data)
-	evd_prob = evidence_answer[:evidence_count]
-	ans_prob = evidence_answer[-1]	
-	
-	print "Evidences:"
-	for i,e in enumerate(evd_prob): 
-		print e
-		print "predicted",
-		hinton.plot(e,max_arr=1)
-		correct = np.zeros((e.shape[0],))
-		correct[ans_evd[i]] = 1
-		print "correct  ",
-		hinton.plot(correct)
+    print "Answer:"
+    print "predicted",
+    hinton.plot(ans_prob,max_arr=1)
 
-
-
-	print "Answer:"
-	print "predicted",
-	hinton.plot(ans_prob,max_arr=1)
-
-	correct = np.zeros((ans_prob.shape[0],))
-	correct[ans_w] = 1
-	print "correct  ",
-	hinton.plot(correct,max_arr=1)
+    correct = np.zeros((ans_prob.shape[0],))
+    correct[ans_w] = 1
+    print "correct  ",
+    hinton.plot(correct,max_arr=1)
 
 
 
